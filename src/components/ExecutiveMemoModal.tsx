@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, X, Printer, Copy, Check, Sparkles, Loader2 } from 'lucide-react';
 import { ExecutiveMetrics } from '../types/dashboard';
+import { generateExecutiveBriefMemo } from '../utils/agentIntelligence';
 
 interface ExecutiveMemoModalProps {
   isOpen: boolean;
@@ -27,26 +28,39 @@ export const ExecutiveMemoModal: React.FC<ExecutiveMemoModalProps> = ({
 
   const loadMemo = async () => {
     setIsLoading(true);
+    const focusArea = `Hospital Quality, Operations & HCAHPS Optimization (${activeDatasetName})`;
+    const metricPayload = {
+      totalComments: metrics.totalComments,
+      avgSatisfaction: metrics.avgSatisfaction,
+      avgCommunication: metrics.avgCommunication,
+      followUpRate: metrics.followUpComplianceRate,
+      riskFlagsCount: metrics.riskFlagsCount,
+    };
+
     try {
       const response = await fetch('/api/ai/executive-brief', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          focusArea: `Hospital Quality, Operations & HCAHPS Optimization (${activeDatasetName})`,
-          metrics: {
-            totalComments: metrics.totalComments,
-            avgSatisfaction: metrics.avgSatisfaction,
-            avgCommunication: metrics.avgCommunication,
-            followUpRate: metrics.followUpComplianceRate,
-            riskFlagsCount: metrics.riskFlagsCount,
-          }
+          focusArea,
+          metrics: metricPayload
         })
       });
 
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Non-JSON response from server');
+      }
+
       const data = await response.json();
-      setMemoText(data.brief);
+      setMemoText(data.brief || generateExecutiveBriefMemo(focusArea, metricPayload));
     } catch (err) {
-      console.error(err);
+      console.warn('Executive brief API route unavailable, using client-side memo synthesizer:', err);
+      setMemoText(generateExecutiveBriefMemo(focusArea, metricPayload));
     } finally {
       setIsLoading(false);
     }

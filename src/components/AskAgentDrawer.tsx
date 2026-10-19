@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, X, Send, Bot, User, Loader2, ArrowRight } from 'lucide-react';
 import { ExecutiveMetrics } from '../types/dashboard';
+import { generateHealthcareAgentAnswer } from '../utils/agentIntelligence';
 
 interface AskAgentDrawerProps {
   isOpen: boolean;
@@ -79,23 +80,33 @@ export const AskAgentDrawer: React.FC<AskAgentDrawerProps> = ({
         })
       });
 
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Non-JSON response from server');
+      }
+
       const data = await response.json();
       const agentMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
-        text: data.answer || 'Analysis complete.',
+        text: data.answer || generateHealthcareAgentAnswer(q, activeContextDescription, metrics),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages((prev) => [...prev, agentMsg]);
     } catch (err) {
-      console.error(err);
-      const errorMsg: Message = {
+      console.warn('API route unavailable, using client-side clinical analytics engine:', err);
+      const fallbackText = generateHealthcareAgentAnswer(q, activeContextDescription, metrics);
+      const agentMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
-        text: 'The healthcare analytics agent synthesized the data using local heuristics. ED wait times and post-discharge medication contradictions remain the primary drivers of negative HCAHPS sentiment.',
+        text: fallbackText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) => [...prev, agentMsg]);
     } finally {
       setIsLoading(false);
     }
