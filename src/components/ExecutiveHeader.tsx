@@ -3,6 +3,7 @@ import { Activity, Sparkles, FileText, Upload, RefreshCw, ShieldCheck } from 'lu
 
 interface ExecutiveHeaderProps {
   activePresetName: string;
+  uploadedFilesCount?: number;
   onOpenAskAgent: () => void;
   onOpenMemo: () => void;
   onOpenDatasetModal: () => void;
@@ -12,6 +13,7 @@ interface ExecutiveHeaderProps {
 
 export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
   activePresetName,
+  uploadedFilesCount = 0,
   onOpenAskAgent,
   onOpenMemo,
   onOpenDatasetModal,
@@ -60,9 +62,10 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
             <button
               onClick={onOpenDatasetModal}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 hover:text-white bg-slate-800/90 hover:bg-slate-700 rounded-md transition-colors border border-slate-700"
+              title="View and manage only files that you upload"
             >
-              <Upload className="w-3.5 h-3.5 text-slate-400" />
-              <span>Dataset / Presets</span>
+              <Upload className="w-3.5 h-3.5 text-teal-400" />
+              <span>Uploaded Files {uploadedFilesCount > 0 ? `(${uploadedFilesCount})` : ''}</span>
             </button>
 
             <button

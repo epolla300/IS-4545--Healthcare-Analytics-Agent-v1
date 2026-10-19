@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { RAW_PATIENT_COMMENTS, DATASET_PRESETS } from './data/patientFeedbackData';
+import { RAW_PATIENT_COMMENTS } from './data/patientFeedbackData';
 import { PatientComment, ServiceLine, VisitType, PatientPersona, Sentiment, RiskCategory, AIAgentOpportunity } from './types/dashboard';
 import { computeExecutiveMetrics } from './utils/analytics';
+import { UploadedDataset } from './utils/csvParser';
 import { ExecutiveHeader } from './components/ExecutiveHeader';
 import { FilterBar } from './components/FilterBar';
 import { Section1ExecutiveOverview } from './components/Section1ExecutiveOverview';
@@ -17,12 +18,46 @@ import { ExecutiveMemoModal } from './components/ExecutiveMemoModal';
 import { CommentsTableModal } from './components/CommentsTableModal';
 import { DatasetManagerModal } from './components/DatasetManagerModal';
 import { AgentSimulationModal } from './components/AgentSimulationModal';
+import { Upload, FileSpreadsheet, Plus } from 'lucide-react';
+
+const INITIAL_UPLOADED_DATASET: UploadedDataset = {
+  id: 'patient-feedback-q3',
+  name: 'patient_feedback_q3.csv',
+  size: '148.5 KB',
+  uploadedAt: 'Today, 08:30 AM',
+  comments: RAW_PATIENT_COMMENTS,
+};
 
 export default function App() {
-  // Dataset state
-  const [activePresetId, setActivePresetId] = useState<string>('metro-q3');
-  const [datasetName, setDatasetName] = useState<string>('Metro Health System Q3 (1,248 Comments)');
-  const [allComments, setAllComments] = useState<PatientComment[]>(RAW_PATIENT_COMMENTS);
+  // Only files uploaded by the user
+  const [uploadedDatasets, setUploadedDatasets] = useState<UploadedDataset[]>(() => {
+    try {
+      const saved = localStorage.getItem('healthcare_uploaded_datasets');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('LocalStorage read error:', e);
+    }
+    return [INITIAL_UPLOADED_DATASET];
+  });
+
+  const [activeDatasetId, setActiveDatasetId] = useState<string>(() => {
+    return uploadedDatasets[0]?.id || 'patient-feedback-q3';
+  });
+
+  const activeDataset = useMemo(() => {
+    return uploadedDatasets.find((d) => d.id === activeDatasetId) || uploadedDatasets[0] || null;
+  }, [uploadedDatasets, activeDatasetId]);
+
+  const [allComments, setAllComments] = useState<PatientComment[]>(() => {
+    return uploadedDatasets[0]?.comments || RAW_PATIENT_COMMENTS;
+  });
+
+  const [datasetName, setDatasetName] = useState<string>(() => {
+    return uploadedDatasets[0]?.name || 'patient_feedback_q3.csv';
+  });
 
   // Filters state
   const [selectedServiceLine, setSelectedServiceLine] = useState<ServiceLine | 'ALL'>('ALL');
@@ -40,7 +75,7 @@ export default function App() {
   const [simulationAgent, setSimulationAgent] = useState<AIAgentOpportunity | null>(null);
 
   // Active section tab / scroll focus
-  const [activeSection, setActiveSection] = useState<string>('sec-1');
+  const [activeSection, setActiveSection] = useState<string>('sec-overview');
 
   // Filter application
   const filteredComments = useMemo(() => {
@@ -62,12 +97,10 @@ export default function App() {
     });
   }, [allComments, selectedServiceLine, selectedPersona, selectedVisitType, selectedSentiment, selectedRisk, searchTerm]);
 
-  // Executive Metrics (scaled relative to active dataset preset)
-  const activePreset = DATASET_PRESETS.find((p) => p.id === activePresetId) || DATASET_PRESETS[0];
-  const scaleMultiplier = activePreset.totalComments / 30; // 30 is base sample size
+  // Executive Metrics directly computed from active uploaded file
   const metrics = useMemo(() => {
-    return computeExecutiveMetrics(filteredComments, scaleMultiplier);
-  }, [filteredComments, scaleMultiplier]);
+    return computeExecutiveMetrics(filteredComments, 1);
+  }, [filteredComments]);
 
   // Check if any filter is active
   const hasActiveFilters =
@@ -93,19 +126,59 @@ export default function App() {
     );
   };
 
-  const handleSelectPreset = (presetId: string) => {
-    const found = DATASET_PRESETS.find((p) => p.id === presetId);
-    if (found) {
-      setActivePresetId(found.id);
-      setDatasetName(found.name);
+  const handleSelectDataset = (datasetId: string) => {
+    const target = uploadedDatasets.find((d) => d.id === datasetId);
+    if (target) {
+      setActiveDatasetId(target.id);
+      setAllComments(target.comments);
+      setDatasetName(target.name);
       resetFilters();
     }
   };
 
-  const handleCustomDatasetLoaded = (newComments: PatientComment[], name: string) => {
+  const handleUploadNewFile = (fileName: string, newComments: PatientComment[], fileSize: string) => {
+    const newDataset: UploadedDataset = {
+      id: `up-${Date.now()}`,
+      name: fileName,
+      size: fileSize,
+      uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+      comments: newComments,
+    };
+
+    const updated = [newDataset, ...uploadedDatasets];
+    setUploadedDatasets(updated);
+    setActiveDatasetId(newDataset.id);
     setAllComments(newComments);
-    setDatasetName(name);
+    setDatasetName(fileName);
     resetFilters();
+
+    try {
+      localStorage.setItem('healthcare_uploaded_datasets', JSON.stringify(updated));
+    } catch (e) {
+      console.warn('LocalStorage save error:', e);
+    }
+  };
+
+  const handleDeleteDataset = (datasetId: string) => {
+    const updated = uploadedDatasets.filter((d) => d.id !== datasetId);
+    setUploadedDatasets(updated);
+
+    try {
+      localStorage.setItem('healthcare_uploaded_datasets', JSON.stringify(updated));
+    } catch (e) {}
+
+    if (activeDatasetId === datasetId) {
+      if (updated.length > 0) {
+        setActiveDatasetId(updated[0].id);
+        setAllComments(updated[0].comments);
+        setDatasetName(updated[0].name);
+      } else {
+        setActiveDatasetId('');
+        setAllComments([]);
+        setDatasetName('No file uploaded');
+      }
+      resetFilters();
+    }
   };
 
   const scrollToSection = (id: string) => {
@@ -121,6 +194,7 @@ export default function App() {
       {/* Executive Header */}
       <ExecutiveHeader
         activePresetName={datasetName}
+        uploadedFilesCount={uploadedDatasets.length}
         onOpenAskAgent={() => setIsAskAgentOpen(true)}
         onOpenMemo={() => setIsMemoOpen(true)}
         onOpenDatasetModal={() => setIsDatasetModalOpen(true)}
@@ -176,71 +250,93 @@ export default function App() {
         </div>
       </div>
 
+      {/* Empty State Banner if no files are uploaded */}
+      {allComments.length === 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+          <div className="bg-white p-10 rounded-xl border-2 border-dashed border-teal-300 text-center shadow-xs">
+            <FileSpreadsheet className="w-12 h-12 text-teal-600 mx-auto mb-3" />
+            <h3 className="text-lg font-bold text-slate-900">No Patient Feedback Dataset Active</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-5">
+              Upload a patient feedback CSV or JSON file to immediately populate the executive overview, NLP analysis, and AI agent recommendations.
+            </p>
+            <button
+              onClick={() => setIsDatasetModalOpen(true)}
+              className="inline-flex items-center space-x-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs rounded-md shadow transition-colors"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Upload Dataset File</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-        {/* SECTION 1: Executive Overview */}
-        <div id="sec-overview">
-          <Section1ExecutiveOverview
-            metrics={metrics}
-            onExploreComments={() => setIsCommentsTableOpen(true)}
-          />
-        </div>
+      {allComments.length > 0 && (
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+          {/* SECTION 1: Executive Overview */}
+          <div id="sec-overview">
+            <Section1ExecutiveOverview
+              metrics={metrics}
+              onExploreComments={() => setIsCommentsTableOpen(true)}
+            />
+          </div>
 
-        {/* SECTION 2: Patient Satisfaction Insights */}
-        <div id="sec-satisfaction">
-          <Section2SatisfactionInsights
-            comments={filteredComments}
-            onSelectServiceLine={(sl) => setSelectedServiceLine(sl as ServiceLine)}
-            onSelectPersona={(p) => setSelectedPersona(p as PatientPersona)}
-          />
-        </div>
+          {/* SECTION 2: Patient Satisfaction Insights */}
+          <div id="sec-satisfaction">
+            <Section2SatisfactionInsights
+              comments={filteredComments}
+              onSelectServiceLine={(sl) => setSelectedServiceLine(sl as ServiceLine)}
+              onSelectPersona={(p) => setSelectedPersona(p as PatientPersona)}
+            />
+          </div>
 
-        {/* SECTION 3: NLP Analysis */}
-        <div id="sec-nlp">
-          <Section3NLPAnalysis
-            onKeywordClick={(kw) => setSearchTerm(kw)}
-            onThemeClick={(th) => setSearchTerm(th)}
-          />
-        </div>
+          {/* SECTION 3: NLP Analysis */}
+          <div id="sec-nlp">
+            <Section3NLPAnalysis
+              onKeywordClick={(kw) => setSearchTerm(kw)}
+              onThemeClick={(th) => setSearchTerm(th)}
+            />
+          </div>
 
-        {/* SECTION 4: Hidden Organizational Problems */}
-        <div id="sec-problems">
-          <Section4HiddenProblems
-            comments={filteredComments}
-            onOpenRawCommentsForTag={(tag) => {
-              setSearchTerm(tag);
-              setIsCommentsTableOpen(true);
-            }}
-          />
-        </div>
+          {/* SECTION 4: Hidden Organizational Problems */}
+          <div id="sec-problems">
+            <Section4HiddenProblems
+              comments={filteredComments}
+              onOpenRawCommentsForTag={(tag) => {
+                setSearchTerm(tag);
+                setIsCommentsTableOpen(true);
+              }}
+            />
+          </div>
 
-        {/* SECTION 6: Healthcare Equity and Accessibility */}
-        <div id="sec-equity">
-          <Section6HealthcareEquity comments={filteredComments} />
-        </div>
+          {/* SECTION 6: Healthcare Equity and Accessibility */}
+          <div id="sec-equity">
+            <Section6HealthcareEquity comments={filteredComments} />
+          </div>
 
-        {/* SECTION 7: AI Risk Monitoring */}
-        <div id="sec-risks">
-          <Section7AIRiskMonitoring
-            comments={filteredComments}
-            onUpdateStatus={handleUpdateStatus}
-          />
-        </div>
+          {/* SECTION 7: AI Risk Monitoring */}
+          <div id="sec-risks">
+            <Section7AIRiskMonitoring
+              comments={filteredComments}
+              onUpdateStatus={handleUpdateStatus}
+            />
+          </div>
 
-        {/* SECTION 8: AI Agent Opportunities */}
-        <div id="sec-agents">
-          <Section8AIAgentOpportunities
-            onSimulateAgent={(agent) => setSimulationAgent(agent)}
-          />
-        </div>
+          {/* SECTION 8: AI Agent Opportunities */}
+          <div id="sec-agents">
+            <Section8AIAgentOpportunities
+              onSimulateAgent={(agent) => setSimulationAgent(agent)}
+            />
+          </div>
 
-        {/* SECTION 9: Executive Recommendations */}
-        <div id="sec-recommendations">
-          <Section9ExecutiveRecommendations
-            onOpenMemo={() => setIsMemoOpen(true)}
-          />
-        </div>
-      </main>
+          {/* SECTION 9: Executive Recommendations */}
+          <div id="sec-recommendations">
+            <Section9ExecutiveRecommendations
+              onOpenMemo={() => setIsMemoOpen(true)}
+            />
+          </div>
+        </main>
+      )}
 
       {/* Modals & Drawers */}
       <AskAgentDrawer
@@ -267,9 +363,11 @@ export default function App() {
       <DatasetManagerModal
         isOpen={isDatasetModalOpen}
         onClose={() => setIsDatasetModalOpen(false)}
-        activePresetId={activePresetId}
-        onSelectPreset={handleSelectPreset}
-        onCustomDatasetLoaded={handleCustomDatasetLoaded}
+        uploadedDatasets={uploadedDatasets}
+        activeDatasetId={activeDatasetId}
+        onSelectDataset={handleSelectDataset}
+        onUploadNewFile={handleUploadNewFile}
+        onDeleteDataset={handleDeleteDataset}
       />
 
       <AgentSimulationModal
